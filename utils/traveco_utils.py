@@ -710,17 +710,31 @@ class TravecomDataCleaner:
 
         # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer)
         if self.config.get('filtering.exclude_bt_pickups', True):
-            if 'System_id.Auftrag' in df.columns and 'RKdNr' in df.columns:
+            # Check for both RKdNr and RKdNr. (column name variations)
+            rkd_col = None
+            if 'RKdNr' in df.columns:
+                rkd_col = 'RKdNr'
+            elif 'RKdNr.' in df.columns:
+                rkd_col = 'RKdNr.'
+
+            if 'System_id.Auftrag' in df.columns and rkd_col is not None:
                 before = len(df)
-                mask = ~((df['System_id.Auftrag'] == 'B&T') & (df['RKdNr'].isna()))
+                mask = ~((df['System_id.Auftrag'] == 'B&T') & (df[rkd_col].isna()))
                 df = df[mask]
 
                 filtered_count = before - len(df)
                 if filtered_count > 0:
                     excluded_summary.append(f"B&T pickup orders: {filtered_count:,}")
                     print(f"   ✓ Excluded B&T pickup orders: {filtered_count:,}")
+                else:
+                    print(f"   ℹ️  No B&T pickup orders found (already filtered or not present)")
             else:
-                print(f"   ⚠️  Required columns not found - skipping B&T pickup filter")
+                missing = []
+                if 'System_id.Auftrag' not in df.columns:
+                    missing.append('System_id.Auftrag')
+                if rkd_col is None:
+                    missing.append('RKdNr/RKdNr.')
+                print(f"   ⚠️  Required columns not found: {missing} - skipping B&T pickup filter")
 
         # Print summary
         total_excluded = original_len - len(df)
