@@ -377,6 +377,90 @@ class TravecomFeatureEngine:
 
         return df
 
+    def classify_order_type_multifield(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Classify order types using multi-field logic (CORRECTED per Christian's feedback)
+
+        Uses combination of:
+        - Column K: Auftragsart (Order type)
+        - Column AU: Lieferart 2.0 (Delivery type)
+        - Column CW: System_id.Auftrag (System ID)
+
+        Classification logic from Christian's email (October 2025):
+        1. B&T Fossil: AU='B&T Fossil' + CW='B&T'
+        2. B&T Holzpellets: AU='B&T Holzpellets' + CW='B&T'
+        3. Flüssigtransporte: AU='Flüssigtransporte' + CW='TRP'
+        4. Palettentransporte - Leergut: K='Leergut' + AU='Palettentransporte' + CW='TRP'
+        5. Palettentransporte - Lieferung: K='Lieferung' + AU='Palettentransporte' + CW='TRP'
+        6. Palettentransporte - Retoure: K in ['Retoure','Abholung'] + AU='Palettentransporte' + CW='TRP'
+        7. EXCLUDE: Losetransporte (contract weight issues)
+
+        Args:
+            df: Input DataFrame with K, AU, CW columns
+
+        Returns:
+            DataFrame with added 'order_type_detailed' column
+        """
+        df = df.copy()
+
+        print(f"\n📦 Classifying order types (multi-field logic):")
+
+        # Check required columns
+        required_cols = ['Auftragsart', 'Lieferart 2.0', 'System_id.Auftrag']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            print(f"   ⚠️  Missing columns: {missing_cols}")
+            print(f"   Returning DataFrame without classification")
+            df['order_type_detailed'] = 'Unknown'
+            return df
+
+        def classify_row(row):
+            k = row['Auftragsart'] if pd.notna(row['Auftragsart']) else ''
+            au = row['Lieferart 2.0'] if pd.notna(row['Lieferart 2.0']) else ''
+            cw = row['System_id.Auftrag'] if pd.notna(row['System_id.Auftrag']) else ''
+
+            # B&T deliveries
+            if au == 'B&T Fossil' and cw == 'B&T':
+                return 'B&T Fossil Delivery'
+            if au == 'B&T Holzpellets' and cw == 'B&T':
+                return 'B&T Pellets Delivery'
+
+            # TRP categories
+            if au == 'Flüssigtransporte' and cw == 'TRP':
+                return 'Liquid Transport'
+
+            # Palettentransporte subcategories
+            if au == 'Palettentransporte' and cw == 'TRP':
+                if k == 'Leergut':
+                    return 'Leergut (Empty Returns)'
+                elif k in ['Retoure', 'Abholung']:
+                    return 'Retoure (Return/Pickup)'
+                elif k == 'Lieferung' or k == '':
+                    # Empty Auftragsart defaults to Lieferung for Palettentransporte
+                    return 'Pallet Delivery'
+
+            # Losetransporte - mark for exclusion
+            if au == 'Losetransporte':
+                return 'EXCLUDE - Losetransporte'
+
+            # Default
+            return 'Other'
+
+        # Apply classification
+        df['order_type_detailed'] = df.apply(classify_row, axis=1)
+
+        # Print distribution
+        print(f"   ✓ Order type distribution:")
+        print(df['order_type_detailed'].value_counts().to_string())
+
+        # Check for Losetransporte to exclude
+        exclude_count = (df['order_type_detailed'] == 'EXCLUDE - Losetransporte').sum()
+        if exclude_count > 0:
+            print(f"\n   ⚠️  Found {exclude_count:,} Losetransporte orders")
+            print(f"      → These should be excluded due to contract weight issues")
+
+        return df
+
     def map_customer_divisions(self, df_orders: pd.DataFrame, df_divisions: pd.DataFrame,
                               customer_col: str = 'RKdNr',
                               division_col: str = 'Sparte') -> pd.DataFrame:
@@ -436,23 +520,40 @@ class TravecomFeatureEngine:
         # Map to orders
         df_orders['sparte'] = df_orders[customer_col].map(division_mapping)
 
-        # Handle unmapped customers (Traveco pseudo-customers)
+        # Handle unmapped customers (CORRECTED per Christian's feedback Oct 2025)
         unmapped_count = df_orders['sparte'].isna().sum()
         mapped_count = len(df_orders) - unmapped_count
 
         if unmapped_count > 0:
-            df_orders['sparte'] = df_orders['sparte'].fillna('Keine Sparte (Traveco)')
+            # Check if unmapped orders have TRAVECO as customer name
+            if 'RKdName' in df_orders.columns:
+                traveco_mask = (df_orders['sparte'].isna()) & (df_orders['RKdName'].str.contains('TRAVECO', case=False, na=False))
+                traveco_count = traveco_mask.sum()
+
+                if traveco_count > 0:
+                    df_orders.loc[traveco_mask, 'sparte'] = 'TRAVECO Intern'
+                    print(f"\n📊 Special handling:")
+                    print(f"   ✓ Found {traveco_count:,} orders with TRAVECO as customer → marked as 'TRAVECO Intern'")
+
+            # Remaining unmapped get generic label
+            remaining_unmapped = df_orders['sparte'].isna().sum()
+            if remaining_unmapped > 0:
+                df_orders['sparte'] = df_orders['sparte'].fillna('Keine Sparte')
+
             print(f"\n📊 Mapping results:")
-            print(f"   ✓ Mapped: {mapped_count:,} orders ({mapped_count/len(df_orders)*100:.1f}%)")
-            print(f"   ⚠️  Unmapped: {unmapped_count:,} orders ({unmapped_count/len(df_orders)*100:.1f}%)")
-            print(f"      → Marked as 'Keine Sparte (Traveco)'")
+            print(f"   ✓ Mapped to divisions: {mapped_count:,} orders ({mapped_count/len(df_orders)*100:.1f}%)")
+            if 'RKdName' in df_orders.columns and traveco_count > 0:
+                print(f"   ✓ TRAVECO Intern: {traveco_count:,} orders ({traveco_count/len(df_orders)*100:.1f}%)")
+            if remaining_unmapped > 0:
+                print(f"   ⚠️  Unmapped: {remaining_unmapped:,} orders ({remaining_unmapped/len(df_orders)*100:.1f}%)")
+                print(f"      → Marked as 'Keine Sparte'")
         else:
             print(f"\n✓ All {len(df_orders):,} orders successfully mapped to Sparten!")
 
         print(f"\n✓ Sparten mapping complete:")
         print(f"   Total divisions: {df_orders['sparte'].nunique()}")
-        print(f"   Top 5 divisions:")
-        print(df_orders['sparte'].value_counts().head())
+        print(f"   Top 10 divisions:")
+        print(df_orders['sparte'].value_counts().head(10))
 
         return df_orders
 
@@ -460,9 +561,13 @@ class TravecomFeatureEngine:
                               auftraggeber_col: str = 'Nummer.Auftraggeber') -> pd.DataFrame:
         """
         Map Auftraggeber numbers to Betriebszentralen (dispatch center) names
+        (CORRECTED per Christian's feedback Oct 2025)
 
-        This maps the 14 invoicing units (Betriebszentralen) that are the actual
+        This maps the 13 invoicing units (Betriebszentralen) that are the actual
         dispatch centers where transports originate and invoices are sent.
+
+        **CORRECTION**: BZ 10 and BZ 9000 are duplicates (warehouse relocation from Hägendorf to Nebikon).
+        We merge BZ 10 → BZ 9000 (both "LC Nebikon") for accurate analysis.
 
         Args:
             df_orders: Orders DataFrame
@@ -475,10 +580,20 @@ class TravecomFeatureEngine:
         df_orders = df_orders.copy()
         df_betriebszentralen = df_betriebszentralen.copy()
 
-        print(f"\n🏢 Betriebszentralen mapping diagnostics:")
+        print(f"\n🏢 Betriebszentralen mapping diagnostics (with BZ 10→9000 merge):")
         print(f"   Orders Auftraggeber column: '{auftraggeber_col}'")
         print(f"   Orders Auftraggeber type: {df_orders[auftraggeber_col].dtype}")
         print(f"   Betriebszentralen type: {df_betriebszentralen['Nummer.Auftraggeber'].dtype}")
+
+        # CRITICAL CORRECTION: Merge BZ 10 → 9000 (same location after relocation)
+        if auftraggeber_col in df_orders.columns:
+            bz10_count = (df_orders[auftraggeber_col] == 10).sum()
+            if bz10_count > 0:
+                df_orders[auftraggeber_col] = df_orders[auftraggeber_col].replace(10, 9000)
+                print(f"\n   ✓ Merged BZ 10 → BZ 9000: {bz10_count:,} orders")
+                print(f"      (Both represent LC Nebikon after warehouse relocation)")
+            else:
+                print(f"\n   ℹ️  No BZ 10 orders found (already merged or not present)")
 
         # Normalize both to same type (Int64 for reliable matching)
         try:
@@ -558,25 +673,43 @@ class TravecomDataCleaner:
 
     def apply_filtering_rules(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Apply business filtering rules from configuration
+        Apply business filtering rules from configuration (CORRECTED per Christian's feedback)
 
-        Exclusions:
-        1. B&T pickup orders: System='B&T' AND Customer (RKdNr) is empty
-        2. Lager (warehouse) orders: Lieferart='Lager Auftrag' OR Carrier number is empty
+        Exclusions (applied in order):
+        1. Lager (warehouse) orders: Lieferart 2.0 == 'Lager Auftrag'
+        2. B&T pickup orders: System='B&T' AND Customer (RKdNr) is empty
+
+        Both filters MUST be applied BEFORE any downstream analysis to ensure accurate counts.
 
         Args:
             df: Input DataFrame
 
         Returns:
-            Filtered DataFrame
+            Filtered DataFrame with detailed statistics
         """
         df = df.copy()
         original_len = len(df)
         excluded_summary = []
 
-        # 1. Exclude B&T pickup orders (System B&T with empty customer)
+        print(f"\n✂️  Applying Filtering Rules (Christian's Feedback - Oct 2025):")
+        print(f"   Starting orders: {original_len:,}")
+
+        # 1. FIRST: Exclude Lager (warehouse) orders
+        if self.config.get('filtering.exclude_lager_orders', True):
+            if 'Lieferart 2.0' in df.columns:
+                before = len(df)
+                mask_lager = df['Lieferart 2.0'] != 'Lager Auftrag'
+                df = df[mask_lager]
+
+                filtered_count = before - len(df)
+                if filtered_count > 0:
+                    excluded_summary.append(f"Lager (warehouse) orders: {filtered_count:,}")
+                    print(f"   ✓ Excluded Lager orders: {filtered_count:,}")
+            else:
+                print(f"   ⚠️  Column 'Lieferart 2.0' not found - skipping Lager filter")
+
+        # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer)
         if self.config.get('filtering.exclude_bt_pickups', True):
-            # Check if columns exist
             if 'System_id.Auftrag' in df.columns and 'RKdNr' in df.columns:
                 before = len(df)
                 mask = ~((df['System_id.Auftrag'] == 'B&T') & (df['RKdNr'].isna()))
@@ -585,36 +718,20 @@ class TravecomDataCleaner:
                 filtered_count = before - len(df)
                 if filtered_count > 0:
                     excluded_summary.append(f"B&T pickup orders: {filtered_count:,}")
-
-        # 2. Exclude Lager (warehouse) orders
-        if self.config.get('filtering.exclude_lager_orders', True):
-            before = len(df)
-
-            # Method 1: Lieferart 2.0 == 'Lager Auftrag'
-            if 'Lieferart 2.0' in df.columns:
-                mask_lager = df['Lieferart 2.0'] != 'Lager Auftrag'
-                df = df[mask_lager]
-
-            # Method 2: Unknown/empty carrier number (indicates warehouse operation)
-            # Carriers with empty number are internal warehouse operations
-            if 'Nummer.Spedition' in df.columns:
-                mask_carrier = df['Nummer.Spedition'].notna()
-                df = df[mask_carrier]
-
-            filtered_count = before - len(df)
-            if filtered_count > 0:
-                excluded_summary.append(f"Lager (warehouse) orders: {filtered_count:,}")
+                    print(f"   ✓ Excluded B&T pickup orders: {filtered_count:,}")
+            else:
+                print(f"   ⚠️  Required columns not found - skipping B&T pickup filter")
 
         # Print summary
         total_excluded = original_len - len(df)
         if total_excluded > 0:
-            print(f"\n✂️  Filtering Summary:")
+            print(f"\n   📊 Filtering Summary:")
             for item in excluded_summary:
-                print(f"   • Excluded {item}")
+                print(f"      • {item}")
             print(f"   • Total excluded: {total_excluded:,} ({total_excluded/original_len*100:.2f}%)")
-            print(f"   • Remaining: {len(df):,} orders")
+            print(f"   • Remaining orders: {len(df):,} ({len(df)/original_len*100:.2f}%)")
         else:
-            print(f"✓ No orders filtered (all {len(df):,} orders passed filtering rules)")
+            print(f"\n   ✓ No orders filtered (all {len(df):,} orders passed filtering rules)")
 
         return df
 
