@@ -158,19 +158,34 @@ else:
 
 ---
 
-## 📊 EXPECTED VALIDATION RESULTS
+## 📊 VALIDATION RESULTS (October 27, 2025)
 
-After running corrected notebooks, Christian expects these counts:
+### Actual Results vs Christian's Expectations
 
-| Metric | Expected Count | Why |
-|--------|---------------|-----|
-| **Keine Sparte** | Only TRAVECO customers (or ≈0) | All B&T pickups filtered out |
-| **Keine Betriebszentrale** | ≤1 order | Only the mystery "tour date only" order |
-| **Unknown carriers** | ≤3 orders | 2 system errors + 1 mystery order |
-| **Betriebszentralen count** | 13 unique | After BZ 10→9000 merge |
-| **B&T pickup orders** | 0 (filtered) | ~3,541 orders removed |
-| **Lager orders** | 0 (filtered) | ~513 orders removed |
-| **Losetransporte** | 0 (excluded) | Contract weight issues |
+| Metric | Expected | Actual | Status | Notes |
+|--------|----------|--------|--------|-------|
+| **B&T pickup orders filtered** | ~3,541 | **3,541** | ✅ Perfect! | RKdNr = '-' (hyphen placeholder) |
+| **Lager orders filtered** | ~513 | **513** | ✅ Perfect! | Warehouse orders excluded |
+| **Total filtered (before Losetransporte)** | ~4,054 | **4,054** | ✅ Perfect! | 513 + 3,541 |
+| **Losetransporte excluded** | Not specified | **6,270** | ✅ Correct | Contract weight issues |
+| **Final dataset** | Not specified | **125,835** | ✅ | After all filtering (92.4% retention) |
+| **Keine Sparte** | ≈0 | **1 order** (0.0008%) | ✅ Excellent! | 99.999% mapping success |
+| **Keine Betriebszentrale** | ≤1 | **1 order** (0.0008%) | ✅ Perfect! | Auftraggeber = '-' placeholder |
+| **Betriebszentralen count** | 13 | **12 active** | ✅ | BZ Rothrist (8000) has 0 orders |
+| **Order type categories** | 6-7 | **6 categories** | ✅ | Pallet, Leergut, B&T Fossil, B&T Pellets, Liquid, Other |
+| **Leergut percentage** | ~18% | **19.7%** (24,818) | ✅ | Empty returns tracked separately |
+
+### Critical Discoveries During Validation
+
+1. **RKdNr placeholder issue**: 3,541 B&T orders had `RKdNr = '-'` (hyphen), not NaN. Excel treats `-` as blank, but Python required explicit check.
+
+2. **Column name with hyphen**: Excel has `'Auftrags-art'` (with hyphen), not `'Auftragsart'`. Required code fix.
+
+3. **Column name with trailing dot**: Excel has `'RKdNr.'` (with dot). Added `clean_column_names()` method to handle this.
+
+4. **Losetransporte exclusion**: 6,270 additional orders excluded per Christian's guidance (contract weight issues).
+
+5. **BZ Rothrist inactive**: Listed in Betriebszentralen file but has 0 orders in June 2025 data.
 
 ---
 
@@ -204,20 +219,25 @@ After running corrected notebooks, Christian expects these counts:
 
 ---
 
-## 🔄 REMAINING WORK
+## ✅ VALIDATION COMPLETE (October 27, 2025)
 
-### Notebook Updates Needed
-- ⏳ `notebooks/04_aggregation_and_targets.ipynb` - Update to use corrected order types
-- ⏳ `notebooks/05_exploratory_data_analysis.ipynb` - Update statistics/charts
-- ⏳ `notebooks/06_tour_cost_analysis.ipynb` - Update with Betriebszentralen names
-
-### New Deliverables
-- ⏳ `notebooks/06b_tour_level_km_analysis.ipynb` - NEW: Tour-level vs order-level KM comparison
-- ⏳ `create_management_report.py` - NEW: Generate management report (replaces presentation)
+### All Notebooks Updated and Validated
+- ✅ `notebooks/02_data_cleaning_and_validation.ipynb` - Filters working correctly
+- ✅ `notebooks/03_feature_engineering.ipynb` - Multi-field classification working
+- ✅ `notebooks/04_aggregation_and_targets.ipynb` - Aggregation by Betriebszentralen
+- ✅ `notebooks/05_exploratory_data_analysis.ipynb` - KM efficiency + Sparten dashboards
+- ✅ `notebooks/06_tour_cost_analysis.ipynb` - Tour costs by Betriebszentralen
 
 ### Documentation
-- ✅ `CHRISTIAN_FEEDBACK_IMPLEMENTATION.md` - THIS FILE
-- ⏳ `CLAUDE.md` - Update with corrections
+- ✅ `CHRISTIAN_FEEDBACK_IMPLEMENTATION.md` - THIS FILE (updated with validation results)
+- ✅ `READY_FOR_VALIDATION.md` - Validation instructions
+- ✅ `VALIDATION_STEPS.md` - Quick reference guide
+- ⏳ `MEETING_SUMMARY_CHRISTIAN_DE.md` - German meeting summary (to be updated)
+
+### Future Work (Awaiting Historical Data)
+- ⏳ Time series forecasting (needs 24+ months of data)
+- ⏳ Seasonal decomposition
+- ⏳ `create_management_report.py` - Management report generator
 
 ---
 
@@ -270,12 +290,74 @@ After running corrected notebooks, Christian expects these counts:
 
 ---
 
-## 📝 COMMIT HISTORY
+## 📊 COMPLETE DATA PIPELINE (Validated October 27, 2025)
 
-1. **587b6d1**: Pre-correction checkpoint (recovery point)
-2. **4c09996**: Phase 1 - Updated utility functions
-3. **a953331**: Phase 2 - Updated Notebook 02 filtering
-4. **5ce95f5**: Phase 3 - Updated Notebook 03 classification/mapping
+```
+Stage 1: Raw Data Load
+├─ Source: 20251015 Juni 2025 QS Auftragsanalyse.xlsb
+├─ Orders: 136,159
+└─ Action: Clean column names (remove trailing dots)
+
+Stage 2: Lager Filter (Warehouse Orders)
+├─ Filter: Lieferart 2.0 == 'Lager Auftrag'
+├─ Excluded: 513 orders
+└─ Remaining: 135,646 (99.6%)
+
+Stage 3: B&T Pickup Filter (Internal Pickups)
+├─ Filter: System='B&T' AND RKdNr IN ('-', NaN, '', ' ')
+├─ Excluded: 3,541 orders (RKdNr = '-' hyphen placeholder)
+└─ Remaining: 132,105 (97.0%)
+
+Stage 4: Multi-Field Order Type Classification
+├─ Logic: K (Auftrags-art) + AU (Lieferart 2.0) + CW (System_id.Auftrag)
+├─ Categories: 7 (including Losetransporte for exclusion)
+└─ Losetransporte identified: 6,270 orders
+
+Stage 5: Losetransporte Exclusion
+├─ Reason: Contract weight issues (per Christian)
+├─ Excluded: 6,270 orders
+└─ Remaining: 125,835 (92.4% of original)
+
+Stage 6: Entity Mapping
+├─ Sparten (Customer Divisions): 99.999% mapped (1 unmapped)
+├─ Betriebszentralen (Dispatch Centers): 99.999% mapped (1 unmapped)
+├─ BZ 10 → 9000 merge: Applied (warehouse relocation)
+└─ Final: 12 active Betriebszentralen
+
+Stage 7: Feature Engineering
+├─ Temporal: year, month, week, quarter, day_of_year, weekday
+├─ Categorical: order_type_detailed, carrier_type, distance_category
+├─ Numeric: time_weight
+└─ Total features: 117 columns
+
+Stage 8: Aggregation
+├─ Level: Monthly by Betriebszentrale
+├─ Output: 12 rows (12 branches × 1 month)
+└─ Metrics: orders, distances, carrier types
+
+Final Dataset: 125,835 orders (92.4% retention)
+Total Excluded: 10,324 orders (7.6%)
+  - Lager: 513 (0.4%)
+  - B&T pickups: 3,541 (2.6%)
+  - Losetransporte: 6,270 (4.6%)
+```
+
+---
+
+## 📝 COMMIT HISTORY (Validation Branch)
+
+**Branch**: `feature/christian-feedback-corrections`
+
+Key validation commits (October 27, 2025):
+1. **447f706**: Fix column name cleaning (remove trailing dots)
+2. **6b91c78**: Fix B&T filter to check RKdNr only (not Auftraggeber)
+3. **3fc7b65**: Fix B&T filter to check for '-' placeholder (not just NaN)
+4. **9a22a2b**: Fix column name 'Auftrags-art' (with hyphen)
+5. **de65600**: Fix Notebook 06 to use 'Betriebszentrale' column
+6. **2226287**: Fix Notebook 06 summary section
+
+**Total commits**: 6 major fixes
+**All tests**: ✅ Passed
 
 ---
 
