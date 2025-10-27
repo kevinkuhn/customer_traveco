@@ -69,6 +69,42 @@ class TravecomDataLoader:
         self.config = config if config else ConfigLoader()
         self.data_path = Path(self.config.get('data.raw_path'))
 
+    def clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Clean column names by removing trailing dots and extra spaces
+
+        Args:
+            df: Input DataFrame
+
+        Returns:
+            DataFrame with cleaned column names
+        """
+        # Store original names for reference
+        original_cols = df.columns.tolist()
+
+        # Clean column names: remove trailing dots and strip spaces
+        cleaned_cols = [col.rstrip('.').strip() if isinstance(col, str) else col for col in df.columns]
+
+        # Check for duplicates after cleaning
+        if len(cleaned_cols) != len(set(cleaned_cols)):
+            # If duplicates, keep original names
+            print("   ⚠️  Column name cleaning would create duplicates - keeping original names")
+            return df
+
+        # Apply cleaned names
+        df.columns = cleaned_cols
+
+        # Show what was changed
+        changes = [(orig, clean) for orig, clean in zip(original_cols, cleaned_cols) if orig != clean]
+        if changes:
+            print(f"   ✓ Cleaned {len(changes)} column names (removed trailing dots)")
+            for orig, clean in changes[:5]:  # Show first 5
+                print(f"      '{orig}' → '{clean}'")
+            if len(changes) > 5:
+                print(f"      ... and {len(changes)-5} more")
+
+        return df
+
     def load_order_analysis(self) -> pd.DataFrame:
         """
         Load main order analysis file (Auftragsanalyse)
@@ -88,6 +124,9 @@ class TravecomDataLoader:
         df = pd.read_excel(file_path, engine='pyxlsb')
 
         print(f"Loaded {len(df):,} orders with {len(df.columns)} columns")
+
+        # Clean column names (remove trailing dots like "RKdNr.")
+        df = self.clean_column_names(df)
 
         return df
 
@@ -716,7 +755,7 @@ class TravecomDataCleaner:
 
         # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer OR empty Auftraggeber)
         if self.config.get('filtering.exclude_bt_pickups', True):
-            # Check for both RKdNr and RKdNr. (column name variations)
+            # Check for RKdNr (cleaned) or RKdNr. (original with dot)
             rkd_col = None
             if 'RKdNr' in df.columns:
                 rkd_col = 'RKdNr'
@@ -725,15 +764,18 @@ class TravecomDataCleaner:
 
             if 'System_id.Auftrag' in df.columns and rkd_col is not None:
                 before = len(df)
-                # B&T pickups: System='B&T' AND (empty customer OR empty Auftraggeber)
+                # B&T pickups: System='B&T' AND (empty customer OR empty/placeholder Auftraggeber)
                 bt_mask = (df['System_id.Auftrag'] == 'B&T')
                 empty_customer_mask = df[rkd_col].isna()
 
-                # Also check for empty Auftraggeber (these are also B&T pickups)
+                # Also check for empty/placeholder Auftraggeber
                 if 'Nummer.Auftraggeber' in df.columns:
-                    empty_auftraggeber_mask = df['Nummer.Auftraggeber'].isna()
+                    # Handle both NaN and placeholder '-'
+                    empty_auftraggeber_mask = df['Nummer.Auftraggeber'].isna() | df['Nummer.Auftraggeber'].isin(['-', '', ' '])
+                    # Combine: B&T AND (empty customer OR empty/placeholder Auftraggeber)
                     mask = ~(bt_mask & (empty_customer_mask | empty_auftraggeber_mask))
                 else:
+                    # Only check customer if Auftraggeber column doesn't exist
                     mask = ~(bt_mask & empty_customer_mask)
 
                 df = df[mask]
