@@ -587,13 +587,19 @@ class TravecomFeatureEngine:
 
         # CRITICAL CORRECTION: Merge BZ 10 → 9000 (same location after relocation)
         if auftraggeber_col in df_orders.columns:
+            # First, replace placeholder values ('-', '', etc.) with NaN
+            placeholder_count = df_orders[auftraggeber_col].isin(['-', '', ' ']).sum()
+            if placeholder_count > 0:
+                df_orders[auftraggeber_col] = df_orders[auftraggeber_col].replace(['-', '', ' '], pd.NA)
+                print(f"\n   ℹ️  Found {placeholder_count:,} orders with placeholder Auftraggeber ('-') → set to NaN")
+
             bz10_count = (df_orders[auftraggeber_col] == 10).sum()
             if bz10_count > 0:
                 df_orders[auftraggeber_col] = df_orders[auftraggeber_col].replace(10, 9000)
-                print(f"\n   ✓ Merged BZ 10 → BZ 9000: {bz10_count:,} orders")
+                print(f"   ✓ Merged BZ 10 → BZ 9000: {bz10_count:,} orders")
                 print(f"      (Both represent LC Nebikon after warehouse relocation)")
             else:
-                print(f"\n   ℹ️  No BZ 10 orders found (already merged or not present)")
+                print(f"   ℹ️  No BZ 10 orders found (already merged or not present)")
 
         # Normalize both to same type (Int64 for reliable matching)
         try:
