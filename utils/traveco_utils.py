@@ -133,6 +133,33 @@ class TravecomDataLoader:
 
         return df
 
+    def load_betriebszentralen(self) -> pd.DataFrame:
+        """
+        Load Betriebszentralen (dispatch centers) mapping file
+
+        Returns:
+            DataFrame with Betriebszentralen mapping (14 invoicing units)
+        """
+        file_name = self.config.get('data.betriebszentralen', 'TRAVECO_Betriebszentralen.csv')
+
+        # Try raw path first
+        file_path = self.data_path / file_name
+
+        # If not found, try data/raw/ subdirectory
+        if not file_path.exists():
+            file_path = self.data_path.parent / 'raw' / file_name
+
+        print(f"Loading Betriebszentralen from: {file_path}")
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"Betriebszentralen file not found: {file_path}")
+
+        df = pd.read_csv(file_path)
+
+        print(f"Loaded {len(df):,} Betriebszentralen (dispatch center) mappings")
+
+        return df
+
     def load_all(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Load all data files
@@ -145,6 +172,20 @@ class TravecomDataLoader:
         divisions = self.load_divisions()
 
         return orders, tours, divisions
+
+    def load_all_with_betriebszentralen(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Load all data files including Betriebszentralen
+
+        Returns:
+            Tuple of (orders, tours, divisions, betriebszentralen) DataFrames
+        """
+        orders = self.load_order_analysis()
+        tours = self.load_tour_assignments()
+        divisions = self.load_divisions()
+        betriebszentralen = self.load_betriebszentralen()
+
+        return orders, tours, divisions, betriebszentralen
 
 
 class TravecomFeatureEngine:
@@ -336,6 +377,172 @@ class TravecomFeatureEngine:
 
         return df
 
+    def map_customer_divisions(self, df_orders: pd.DataFrame, df_divisions: pd.DataFrame,
+                              customer_col: str = 'RKdNr',
+                              division_col: str = 'Sparte') -> pd.DataFrame:
+        """
+        Map customer numbers to their divisions (Sparten)
+
+        Args:
+            df_orders: Orders DataFrame
+            df_divisions: Divisions DataFrame (from Sparten.xlsx)
+            customer_col: Customer number column in orders
+            division_col: Division column in divisions file
+
+        Returns:
+            DataFrame with added 'sparte' column
+        """
+        df_orders = df_orders.copy()
+        df_divisions = df_divisions.copy()
+
+        # Identify the customer number column in divisions file
+        # Usually the first column (Kunden-Nr.)
+        divisions_customer_col = df_divisions.columns[0]
+
+        print(f"\n🔍 Sparten mapping diagnostics:")
+        print(f"   Orders customer column: '{customer_col}'")
+        print(f"   Divisions customer column: '{divisions_customer_col}'")
+        print(f"   Orders customer type: {df_orders[customer_col].dtype}")
+        print(f"   Divisions customer type: {df_divisions[divisions_customer_col].dtype}")
+
+        # Normalize both to same type (convert to Int64 for reliable matching)
+        # This handles float (946200.0) vs int (946200) mismatches
+        try:
+            df_orders[customer_col] = pd.to_numeric(df_orders[customer_col], errors='coerce').astype('Int64')
+            df_divisions[divisions_customer_col] = pd.to_numeric(df_divisions[divisions_customer_col], errors='coerce').astype('Int64')
+            print(f"   ✓ Converted both to Int64 for matching")
+        except Exception as e:
+            print(f"   ⚠️  Type conversion failed: {e}")
+            print(f"   Proceeding with original types")
+
+        # Check for matches before mapping
+        orders_customers = set(df_orders[customer_col].dropna().unique())
+        divisions_customers = set(df_divisions[divisions_customer_col].dropna().unique())
+        matching = orders_customers & divisions_customers
+
+        print(f"   Unique customers in orders: {len(orders_customers):,}")
+        print(f"   Unique customers in divisions: {len(divisions_customers):,}")
+        print(f"   Matching customers: {len(matching):,}")
+
+        if len(matching) == 0:
+            print(f"\n   ⚠️  WARNING: No matching customers found!")
+            print(f"   Sample from orders: {list(orders_customers)[:3]}")
+            print(f"   Sample from divisions: {list(divisions_customers)[:3]}")
+            print(f"   All orders will be marked as 'Keine Sparte (Traveco)'")
+
+        # Create mapping dictionary
+        division_mapping = df_divisions.set_index(divisions_customer_col)[division_col].to_dict()
+
+        # Map to orders
+        df_orders['sparte'] = df_orders[customer_col].map(division_mapping)
+
+        # Handle unmapped customers (Traveco pseudo-customers)
+        unmapped_count = df_orders['sparte'].isna().sum()
+        mapped_count = len(df_orders) - unmapped_count
+
+        if unmapped_count > 0:
+            df_orders['sparte'] = df_orders['sparte'].fillna('Keine Sparte (Traveco)')
+            print(f"\n📊 Mapping results:")
+            print(f"   ✓ Mapped: {mapped_count:,} orders ({mapped_count/len(df_orders)*100:.1f}%)")
+            print(f"   ⚠️  Unmapped: {unmapped_count:,} orders ({unmapped_count/len(df_orders)*100:.1f}%)")
+            print(f"      → Marked as 'Keine Sparte (Traveco)'")
+        else:
+            print(f"\n✓ All {len(df_orders):,} orders successfully mapped to Sparten!")
+
+        print(f"\n✓ Sparten mapping complete:")
+        print(f"   Total divisions: {df_orders['sparte'].nunique()}")
+        print(f"   Top 5 divisions:")
+        print(df_orders['sparte'].value_counts().head())
+
+        return df_orders
+
+    def map_betriebszentralen(self, df_orders: pd.DataFrame, df_betriebszentralen: pd.DataFrame,
+                              auftraggeber_col: str = 'Nummer.Auftraggeber') -> pd.DataFrame:
+        """
+        Map Auftraggeber numbers to Betriebszentralen (dispatch center) names
+
+        This maps the 14 invoicing units (Betriebszentralen) that are the actual
+        dispatch centers where transports originate and invoices are sent.
+
+        Args:
+            df_orders: Orders DataFrame
+            df_betriebszentralen: Betriebszentralen DataFrame (from TRAVECO_Betriebszentralen.csv)
+            auftraggeber_col: Auftraggeber column name in orders
+
+        Returns:
+            DataFrame with added 'betriebszentrale_name' column
+        """
+        df_orders = df_orders.copy()
+        df_betriebszentralen = df_betriebszentralen.copy()
+
+        print(f"\n🏢 Betriebszentralen mapping diagnostics:")
+        print(f"   Orders Auftraggeber column: '{auftraggeber_col}'")
+        print(f"   Orders Auftraggeber type: {df_orders[auftraggeber_col].dtype}")
+        print(f"   Betriebszentralen type: {df_betriebszentralen['Nummer.Auftraggeber'].dtype}")
+
+        # Normalize both to same type (Int64 for reliable matching)
+        try:
+            df_orders[auftraggeber_col] = pd.to_numeric(df_orders[auftraggeber_col], errors='coerce').astype('Int64')
+            df_betriebszentralen['Nummer.Auftraggeber'] = pd.to_numeric(df_betriebszentralen['Nummer.Auftraggeber'], errors='coerce').astype('Int64')
+            print(f"   ✓ Converted both to Int64 for matching")
+        except Exception as e:
+            print(f"   ⚠️  Type conversion failed: {e}")
+            print(f"   Proceeding with original types")
+
+        # Check for matches before mapping
+        orders_numbers = set(df_orders[auftraggeber_col].dropna().unique())
+        betriebszentralen_numbers = set(df_betriebszentralen['Nummer.Auftraggeber'].dropna().unique())
+        matching = orders_numbers & betriebszentralen_numbers
+
+        print(f"   Unique Auftraggeber in orders: {len(orders_numbers):,}")
+        print(f"   Unique Betriebszentralen numbers: {len(betriebszentralen_numbers):,}")
+        print(f"   Matching numbers: {len(matching):,}")
+
+        if len(matching) == 0:
+            print(f"\n   ⚠️  WARNING: No matching Betriebszentralen found!")
+            print(f"   Sample from orders: {list(orders_numbers)[:5]}")
+            print(f"   Sample from Betriebszentralen: {list(betriebszentralen_numbers)[:5]}")
+
+        # Handle duplicates: use first match (10 and 9000 both = LC Nebikon)
+        # Drop duplicates keeping first occurrence
+        betriebszentralen_unique = df_betriebszentralen.drop_duplicates(
+            subset='Nummer.Auftraggeber', keep='first'
+        )
+
+        duplicates_count = len(df_betriebszentralen) - len(betriebszentralen_unique)
+        if duplicates_count > 0:
+            print(f"\n   ℹ️  Found {duplicates_count} duplicate Auftraggeber numbers (keeping first match)")
+
+        # Create mapping dictionary: Nummer.Auftraggeber -> Name1
+        betriebszentralen_mapping = betriebszentralen_unique.set_index('Nummer.Auftraggeber')['Name1'].to_dict()
+
+        # Map to orders
+        df_orders['betriebszentrale_name'] = df_orders[auftraggeber_col].map(betriebszentralen_mapping)
+
+        # Handle unmapped (mark as "Unknown Betriebszentrale")
+        unmapped_count = df_orders['betriebszentrale_name'].isna().sum()
+        mapped_count = len(df_orders) - unmapped_count
+
+        if unmapped_count > 0:
+            df_orders['betriebszentrale_name'] = df_orders['betriebszentrale_name'].fillna('Unknown Betriebszentrale')
+            print(f"\n📊 Mapping results:")
+            print(f"   ✓ Mapped: {mapped_count:,} orders ({mapped_count/len(df_orders)*100:.1f}%)")
+            print(f"   ⚠️  Unmapped: {unmapped_count:,} orders ({unmapped_count/len(df_orders)*100:.1f}%)")
+            print(f"      → Marked as 'Unknown Betriebszentrale'")
+
+            # Show which Auftraggeber numbers are unmapped
+            unmapped_numbers = df_orders[df_orders['betriebszentrale_name'] == 'Unknown Betriebszentrale'][auftraggeber_col].unique()
+            print(f"   Unmapped Auftraggeber numbers: {sorted([int(x) for x in unmapped_numbers if pd.notna(x)])}")
+        else:
+            print(f"\n✓ All {len(df_orders):,} orders successfully mapped to Betriebszentralen!")
+
+        print(f"\n✓ Betriebszentralen mapping complete:")
+        print(f"   Total Betriebszentralen: {df_orders['betriebszentrale_name'].nunique()}")
+        print(f"   Distribution:")
+        print(df_orders['betriebszentrale_name'].value_counts())
+
+        return df_orders
+
 
 class TravecomDataCleaner:
     """Data cleaning and validation utilities"""
@@ -353,6 +560,10 @@ class TravecomDataCleaner:
         """
         Apply business filtering rules from configuration
 
+        Exclusions:
+        1. B&T pickup orders: System='B&T' AND Customer (RKdNr) is empty
+        2. Lager (warehouse) orders: Lieferart='Lager Auftrag' OR Carrier number is empty
+
         Args:
             df: Input DataFrame
 
@@ -361,16 +572,49 @@ class TravecomDataCleaner:
         """
         df = df.copy()
         original_len = len(df)
+        excluded_summary = []
 
-        # Exclude B&T pickup orders (System B&T with empty customer)
+        # 1. Exclude B&T pickup orders (System B&T with empty customer)
         if self.config.get('filtering.exclude_bt_pickups', True):
             # Check if columns exist
             if 'System_id.Auftrag' in df.columns and 'RKdNr' in df.columns:
+                before = len(df)
                 mask = ~((df['System_id.Auftrag'] == 'B&T') & (df['RKdNr'].isna()))
                 df = df[mask]
 
-                filtered_count = original_len - len(df)
-                print(f"Excluded {filtered_count:,} B&T pickup orders")
+                filtered_count = before - len(df)
+                if filtered_count > 0:
+                    excluded_summary.append(f"B&T pickup orders: {filtered_count:,}")
+
+        # 2. Exclude Lager (warehouse) orders
+        if self.config.get('filtering.exclude_lager_orders', True):
+            before = len(df)
+
+            # Method 1: Lieferart 2.0 == 'Lager Auftrag'
+            if 'Lieferart 2.0' in df.columns:
+                mask_lager = df['Lieferart 2.0'] != 'Lager Auftrag'
+                df = df[mask_lager]
+
+            # Method 2: Unknown/empty carrier number (indicates warehouse operation)
+            # Carriers with empty number are internal warehouse operations
+            if 'Nummer.Spedition' in df.columns:
+                mask_carrier = df['Nummer.Spedition'].notna()
+                df = df[mask_carrier]
+
+            filtered_count = before - len(df)
+            if filtered_count > 0:
+                excluded_summary.append(f"Lager (warehouse) orders: {filtered_count:,}")
+
+        # Print summary
+        total_excluded = original_len - len(df)
+        if total_excluded > 0:
+            print(f"\n✂️  Filtering Summary:")
+            for item in excluded_summary:
+                print(f"   • Excluded {item}")
+            print(f"   • Total excluded: {total_excluded:,} ({total_excluded/original_len*100:.2f}%)")
+            print(f"   • Remaining: {len(df):,} orders")
+        else:
+            print(f"✓ No orders filtered (all {len(df):,} orders passed filtering rules)")
 
         return df
 

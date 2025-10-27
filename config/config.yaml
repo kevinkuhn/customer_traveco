@@ -6,6 +6,7 @@ data:
   order_analysis: "20251015 Juni 2025 QS Auftragsanalyse.xlsb"
   tour_assignments: "20251015 QS Tourenaufstellung Juni 2025.xlsx"
   divisions: "20251015 Sparten.xlsx"
+  betriebszentralen: "TRAVECO_Betriebszentralen.csv"  # 14 dispatch centers (invoicing units)
 
   # Processed data paths (relative to notebooks directory)
   processed_path: "../data/processed/"
@@ -42,6 +43,9 @@ features:
 filtering:
   # Exclude B&T pickup orders (System B&T with empty customer)
   exclude_bt_pickups: true
+
+  # Exclude Lager (warehouse) orders - not relevant for transport analysis
+  exclude_lager_orders: true
 
   # Carrier number ranges
   internal_carrier_max: 8889  # 1-8889 are TRAVECO internal

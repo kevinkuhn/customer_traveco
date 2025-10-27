@@ -4,34 +4,118 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **transport logistics forecasting project** for Travecom, a Swiss transport/logistics company. The project implements advanced time series forecasting to predict 2025 transport demand using multiple ensemble models.
+This is a **transport logistics analysis project** for Traveco (Travecom), a Swiss transport/logistics company. The project performs operational analysis of June 2025 transport data with corrected business logic for accurate cost attribution and performance insights.
 
-**Client**: Travecom (Switzerland)
-**Objective**: Predict 2025 monthly transport metrics (revenue, external drivers, personnel costs) using historical order data
-**Stage**: Analytical prototype with strategic recommendations for productionization
+**Client**: Traveco (Switzerland)
+**Objective**: Analyze transport operations with correct cost attribution, track order types (including Leergut), calculate vehicle costs, and measure KM efficiency
+**Stage**: Operational analysis complete with corrected methodology; forecasting awaits historical data (24+ months needed)
+**Key Achievement**: Corrected aggregation from dispatch location (Dispostelle) to order owner (Auftraggeber) for accurate cost attribution
+
+## ⚠️ CRITICAL CORRECTIONS APPLIED (October 2025)
+
+This project underwent a major methodology correction. If working with older code/notebooks, be aware:
+
+### What Was Corrected:
+
+1. **Cost Attribution** (MOST CRITICAL):
+   - ❌ **OLD**: Aggregated by `Id.Dispostelle` (dispatch location) - Column H
+   - ✅ **NEW**: Aggregated by `Nummer.Auftraggeber` (order owner/payer) - Column G
+   - **Why**: Costs must be attributed to who pays for the transport, not who dispatches it
+   - **Impact**: Notebook 04 cells 8-9 changed completely
+
+2. **Order Type Classification**:
+   - ❌ **OLD**: 2 categories (Pickup, Delivery)
+   - ✅ **NEW**: 5 categories (Delivery, Pickup/Multi-leg, Leergut/Empty Returns, Retoure, Abholung)
+   - **Why**: Leergut (empty container returns) are ~18% of orders and need separate tracking
+   - **Impact**: Notebook 03 cell 11, Notebook 04 cell 9
+
+3. **Data Filtering**:
+   - ❌ **OLD**: Included all orders
+   - ✅ **NEW**: Exclude "Lager Auftrag" (warehouse orders) and orders with missing carrier numbers
+   - **Why**: Warehouse operations are not transport operations
+   - **Impact**: `utils/traveco_utils.py` `apply_filtering_rules()`, `config.yaml`
+
+4. **Sparten Mapping**:
+   - ❌ **OLD**: Type mismatch caused zero matches (string vs int customer numbers)
+   - ✅ **NEW**: Auto-convert both to Int64 for reliable matching
+   - **Why**: Orders had string customer IDs, Divisions had integers
+   - **Impact**: `utils/traveco_utils.py` `map_customer_divisions()`, Notebook 03 cell 16
+
+5. **Betriebszentralen Mapping** (October 2025):
+   - ❌ **OLD**: Aggregated by numeric Auftraggeber IDs (3000, 5000, etc.) - 12 entities
+   - ✅ **NEW**: Mapped to Betriebszentralen names (BZ Oberbipp, LC Nebikon, etc.) - 14 entities
+   - **Why**: The 14 Betriebszentralen are the actual invoicing units (dispatch centers)
+   - **Impact**: Added `data/raw/TRAVECO_Betriebszentralen.csv`, new column `betriebszentrale_name`
+   - **Files**: Notebook 03 Section 7.5, Notebook 04 cells 8-9, Notebooks 05-06, `create_presentation.py`
+
+6. **New Analyses Added**:
+   - ✅ Tour cost calculation (KM + time components) - Notebook 06
+   - ✅ KM efficiency analysis (actual vs billed) - Notebook 05 Section 12
+   - ✅ Sparten distribution analysis - Notebook 05 Section 13
+   - ✅ Updated presentation with corrected insights
+
+### Files Most Affected:
+- `notebooks/04_aggregation_and_targets.ipynb` - **Complete rewrite of aggregation logic**
+- `notebooks/03_feature_engineering.ipynb` - Enhanced order types, fixed Sparten, added Betriebszentralen mapping
+- `notebooks/05_exploratory_data_analysis.ipynb` - Added Sections 12-13, updated branch detection
+- `notebooks/06_tour_cost_analysis.ipynb` - **NEW notebook**, uses Betriebszentralen
+- `utils/traveco_utils.py` - Added `map_betriebszentralen()`, `load_betriebszentralen()`
+- `create_presentation.py` - Updated with all corrections (13 slides), uses Betriebszentralen names
+- `data/raw/TRAVECO_Betriebszentralen.csv` - **NEW file** with 14 dispatch center mappings
+
+### If You See Errors:
+- **"AttributeError: map_customer_divisions"**: Restart Jupyter kernel (see `TROUBLESHOOTING.md`)
+- **"AttributeError: map_betriebszentralen"**: Restart Jupyter kernel after updating `traveco_utils.py`
+- **"betriebszentrale_name not found"**: Run Notebook 03 with updated Betriebszentralen mapping section
+- **All orders show "Keine Sparte"**: Sparten mapping type mismatch - fixed in latest code
+- **Only 12 entities instead of 14**: Missing Betriebszentralen mapping - rerun Notebook 03
 
 ## Technology Stack
 
 - **Language**: Python
 - **Primary Environment**: Jupyter Notebooks
 - **Key Libraries**:
-  - **Forecasting**: Prophet, SARIMAX (statsmodels), XGBoost
-  - **ML**: scikit-learn (RandomForest, GradientBoostingRegressor)
-  - **Data**: pandas, numpy, scipy
-  - **Visualization**: Plotly (interactive dashboards)
-  - **Utilities**: tqdm, warnings
+  - **Analysis**: pandas, numpy, scipy
+  - **Visualization**: Plotly (interactive dashboards), matplotlib, seaborn
+  - **Presentation**: python-pptx (PowerPoint generation)
+  - **Data**: openpyxl (Excel), pyxlsb (.xlsb files)
+  - **Forecasting** (future): Prophet, SARIMAX, XGBoost (awaiting historical data)
 
 ## Repository Structure
 
 ```
 customer_traveco/
 ├── notebooks/
-│   └── Forecast.ipynb           # Main forecasting implementation (424 lines)
+│   ├── 02_data_cleaning_and_validation.ipynb    # Data cleaning with corrected filtering
+│   ├── 03_feature_engineering.ipynb              # Features + Sparten mapping (fixed type mismatch)
+│   ├── 04_aggregation_and_targets.ipynb          # Aggregation by Auftraggeber (CORRECTED)
+│   ├── 05_exploratory_data_analysis.ipynb        # EDA + KM efficiency + Sparten charts
+│   └── 06_tour_cost_analysis.ipynb               # Vehicle cost calculation + efficiency
 ├── data/
-│   └── swisstransfer_*/         # Excel files with transport order data
-│       ├── 20251015 Sparten.xlsx                    # Product categories
-│       ├── 20251015 QS Tourenaufstellung Juni 2025.xlsx  # Tour assignments
-│       └── 20251015 Juni 2025 QS Auftragsanalyse.xlsb   # Order analysis (23.6 MB)
+│   ├── raw/
+│   │   └── TRAVECO_Betriebszentralen.csv         # 14 dispatch centers mapping (NEW)
+│   ├── swisstransfer_*/         # Raw Excel files with transport order data
+│   │   ├── 20251015 Sparten.xlsx                    # Customer divisions (Sparten)
+│   │   ├── 20251015 QS Tourenaufstellung Juni 2025.xlsx  # Tour assignments
+│   │   └── 20251015 Juni 2025 QS Auftragsanalyse.xlsb   # Order analysis (23.6 MB)
+│   └── processed/               # Processed data files
+│       ├── clean_orders.csv                      # Cleaned orders (Lager excluded)
+│       ├── features_engineered.csv               # With Leergut, Sparten, Betriebszentralen, temporal features
+│       ├── monthly_aggregated.csv                # By Betriebszentralen (14 dispatch centers)
+│       ├── tour_costs.csv                        # Vehicle costs + KM efficiency
+│       └── orders_with_tour_costs.csv            # Orders joined with tour-level costs
+├── utils/
+│   └── traveco_utils.py         # Core utilities (enhanced with Sparten mapping)
+├── results/                      # Generated charts and dashboards
+│   ├── km_efficiency_dashboard.html              # Interactive efficiency analysis
+│   ├── sparten_distribution_dashboard.html       # Customer division insights
+│   └── Traveco_Data_Insights_June2025_Corrected.pptx  # Updated presentation
+├── config/
+│   └── config.yaml              # Configuration (exclude_lager_orders: true)
+├── create_presentation.py       # PowerPoint generator (UPDATED with Betriebszentralen)
+├── debug_sparten_mapping.py     # Debug script for Sparten type mismatch
+├── BETRIEBSZENTRALEN_MIGRATION.md  # Technical documentation for Betriebszentralen mapping
+├── TROUBLESHOOTING.md           # Module caching and common issues
 └── information/
     ├── recommendation.md        # Strategic forecasting recommendations
     └── mail.pdf                 # Client communication
@@ -87,201 +171,362 @@ For building this project step-by-step, create the following notebook sequence:
 - Create lag features (1, 3, 6, 12 months)
 - **Output**: `data/processed/features_engineered.csv`
 
-**`04_aggregation_and_targets.ipynb`**
-- Monthly aggregation by branch
-- Calculate target variables: revenue, external_drivers, personnel_costs
-- Create train/validation split (e.g., hold out 2024 for validation)
-- Verify aggregation logic against business expectations
-- **Output**: `data/processed/monthly_aggregated.csv`
+**`04_aggregation_and_targets.ipynb`** ⚠️ CRITICAL CORRECTION APPLIED
+- **CORRECTED**: Monthly aggregation by **Auftraggeber (Column G)** instead of Dispostelle
+- This ensures costs are attributed to order owner/payer, not dispatch location
+- Enhanced order type breakdown: delivery, pickup, leergut, retoure
+- Calculate target variables: total_orders, distances, external/internal drivers
+- Dual-view aggregation for comparison (both Auftraggeber and Dispostelle)
+- **Output**: `data/processed/monthly_aggregated.csv` (by Auftraggeber)
+- **Location**: Cells 8-9 contain the critical aggregation logic
 
 #### Phase 3: Exploratory Analysis
 
-**`05_exploratory_data_analysis.ipynb`**
+**`05_exploratory_data_analysis.ipynb`** ✅ ENHANCED WITH NEW SECTIONS
 - Time series visualization (trends, seasonality)
 - Seasonal decomposition (trend, seasonal, residual)
-- Branch-level analysis (which branches have strongest seasonality?)
-- Customer division analysis (Sparten patterns)
-- Carrier analysis (internal vs external trends)
-- Tour type analysis (FD, SH, Normal, etc.)
+- Entity-level analysis (Auftraggeber or Dispostelle)
 - Correlation analysis between features
-- Identify Swiss-specific patterns (holidays, school vacations)
-- **Output**: Insights document, key visualizations saved
+- **Section 12** (NEW): Kilometer Efficiency Analysis
+  - 4-panel dashboard: distribution, categories, actual vs billed, efficiency by size
+  - Identifies tours with >10% inefficiency for optimization
+  - Output: `results/km_efficiency_dashboard.html`
+- **Section 13** (NEW): Customer Division (Sparten) Analysis
+  - Top 15 Sparten by volume, distribution pie chart
+  - Distance and carrier patterns by Sparten
+  - Output: `results/sparten_distribution_dashboard.html`
+- **Output**: Insights document, interactive dashboards, key visualizations saved
 
-#### Phase 4: Baseline Models
+#### Phase 4: Tour Cost Analysis (Replaces Baseline Models for now)
 
-**`06_baseline_models.ipynb`**
+**`06_tour_cost_analysis.ipynb`** ✅ NEW NOTEBOOK
+- Calculate full vehicle costs: (KM × KM Cost) + (Time × 60 × Minute Cost)
+- Load tour data from `20251015 QS Tourenaufstellung Juni 2025.xlsx`
+- Join PraCar system data (actual km, actual time, costs)
+- Calculate KM efficiency ratio: Actual KM / Billed KM
+- Categorize efficiency: Excellent (<0.9), Good (0.9-1.0), Acceptable (1.0-1.1), Poor (>1.1)
+- **Output**: `data/processed/tour_costs.csv`, `data/processed/orders_with_tour_costs.csv`
+- **Note**: Forecasting models deferred until historical data (24+ months) is available
+
+#### Phase 5: Reporting and Presentation
+
+**`create_presentation.py`** ✅ UPDATED
+- Generates PowerPoint presentation with corrected analysis
+- Dynamically adapts to Auftraggeber vs Dispostelle aggregation
+- Includes new slides:
+  - Slide 7: KM Efficiency Analysis (NEW)
+  - Slide 8: Sparten (Customer Division) Analysis (NEW)
+  - Updated slides with corrected insights and recommendations
+- **Output**: `results/Traveco_Data_Insights_June2025_Corrected.pptx` (13 slides)
+- **Run**: `pipenv run python create_presentation.py`
+
+---
+
+## 🔮 FUTURE WORK: Time Series Forecasting (Awaiting Historical Data)
+
+**Status**: Waiting for historical data (~36 months back from June 2025)
+**Required**: Data from ~June 2022 to June 2025 for robust forecasting
+**Objective**: Predict 2025+ monthly transport metrics (revenue, external drivers, personnel costs)
+
+Once historical data is available, implement the following forecasting workflow:
+
+### Phase 6: Baseline Forecasting Models
+
+**`07_baseline_models.ipynb`** (TO BE CREATED)
 - Current method: Linear averaging (yearly average / 12)
 - Simple moving average (3-month, 6-month, 12-month)
 - Naive forecast (last year same month)
 - Seasonal naive (repeat last year's pattern)
 - Calculate baseline metrics (MAPE, RMSE)
-- **Output**: Baseline performance benchmarks
+- **Purpose**: Establish performance benchmarks to beat
+- **Output**: `results/baseline_forecasts.csv`
 
-#### Phase 5: Advanced Models - Seasonality Focus
+### Phase 7: Advanced Models - Seasonality Focus (Model Family A)
 
-**`07_model_a_prophet.ipynb`**
+**`08_model_a_prophet.ipynb`** (TO BE CREATED)
 - Prophet implementation with custom seasonalities
 - Hyperparameter tuning (changepoint_prior_scale, seasonality parameters)
-- Add Swiss holidays
-- Test quarterly (91.25 days) and monthly (30.5 days) seasonalities
-- Cross-validation using TimeSeriesSplit
-- Generate 2025 forecasts
-- **Output**: Prophet model, forecasts, performance metrics
+- Add Swiss holidays (National Day, Christmas, Easter, etc.)
+- Test custom seasonalities:
+  - Quarterly (91.25 days) - for seasonal transport patterns
+  - Monthly (30.5 days) - for monthly business cycles
+- Cross-validation using TimeSeriesSplit (5-fold recommended)
+- Generate 2025/2026 forecasts with confidence intervals
+- **Output**: `models/prophet_model.pkl`, forecasts, performance metrics
 
-**`08_model_a_sarimax.ipynb`**
-- SARIMAX implementation
-- Order selection (test different p,d,q and P,D,Q,s combinations)
-- Diagnostic plots (residuals, ACF, PACF)
-- Stationarity tests (ADF test)
-- Generate 2025 forecasts
-- **Output**: SARIMAX model, forecasts, performance metrics
+**`09_model_a_sarimax.ipynb`** (TO BE CREATED)
+- SARIMAX (Seasonal ARIMA) implementation
+- Order selection process:
+  - Use ACF/PACF plots from notebook 05 to determine (p, d, q)
+  - Test seasonal orders: (P, D, Q, s) with s=12 for monthly data
+  - Grid search over reasonable ranges (e.g., p,q ∈ [0,3], P,Q ∈ [0,2])
+- Diagnostic plots (residuals, ACF, PACF, Q-Q plot)
+- Stationarity tests (Augmented Dickey-Fuller test)
+- Ljung-Box test for residual autocorrelation
+- Generate 2025/2026 forecasts
+- **Output**: `models/sarimax_model.pkl`, forecasts, diagnostics
 
-**`09_model_a_xgboost.ipynb`**
-- XGBoost with temporal features
-- Feature importance analysis
-- Hyperparameter tuning (n_estimators, max_depth, learning_rate)
-- Cross-validation
-- Generate 2025 forecasts
-- **Output**: XGBoost model, forecasts, feature importance, metrics
+**`10_model_a_xgboost.ipynb`** (TO BE CREATED)
+- XGBoost with temporal and engineered features
+- Features to include:
+  - Temporal: year, month, week, quarter, day_of_year, weekday
+  - Lag features: [1, 3, 6, 12] months
+  - Rolling statistics: 3-month, 6-month averages
+  - Sparten-level aggregations
+  - External/internal driver ratios
+  - KM efficiency metrics
+- Hyperparameter tuning via GridSearchCV or RandomizedSearchCV:
+  - n_estimators: [100, 200, 300]
+  - max_depth: [3, 6, 9]
+  - learning_rate: [0.01, 0.05, 0.1]
+  - subsample: [0.7, 0.8, 0.9]
+- Feature importance analysis (identify key drivers)
+- Cross-validation (TimeSeriesSplit)
+- Generate 2025/2026 forecasts
+- **Output**: `models/xgboost_model.pkl`, forecasts, feature importance plot
 
-#### Phase 6: Advanced Models - Time Decay Focus
+### Phase 8: Advanced Models - Time Decay Focus (Model Family B)
 
-**`10_model_b_weighted_prophet.ipynb`**
+**Rationale**: Recent data may be more relevant due to market changes, new routes, customer shifts
+
+**`11_model_b_weighted_prophet.ipynb`** (TO BE CREATED)
 - Prophet with exponential time decay weighting
-- Test different decay rates (λ = 0.2, 0.3, 0.4, 0.5)
-- Implement weighted loss via data duplication or custom loss
-- Compare against standard Prophet
-- Generate 2025 forecasts
-- **Output**: Weighted Prophet model, forecasts, metrics
+- Weight formula: `w(t) = exp(-λ * (T_current - t) / 365)`
+- Test different decay rates (λ):
+  - λ = 0.2 (slow decay, ~5-year half-life)
+  - λ = 0.3 (medium decay, ~3-year half-life)
+  - λ = 0.5 (fast decay, ~2-year half-life)
+- Implementation approaches:
+  - Data duplication: Replicate recent observations proportional to weights
+  - Custom Prophet weights (if supported in newer versions)
+- More responsive changepoint detection (changepoint_prior_scale=0.1)
+- Compare against standard Prophet from notebook 08
+- Generate 2025/2026 forecasts
+- **Output**: `models/weighted_prophet_model.pkl`, forecasts, decay rate comparison
 
-**`11_model_b_time_weighted_ensemble.ipynb`**
-- Year-level RandomForest ensemble
-- Calculate year weights: `exp(-0.5 * (2025 - year))`
-- Weighted voting mechanism
-- Test different ensemble strategies
-- Generate 2025 forecasts
-- **Output**: Ensemble model, forecasts, metrics
+**`12_model_b_time_weighted_ensemble.ipynb`** (TO BE CREATED)
+- Year-level RandomForest ensemble with weighted voting
+- Strategy:
+  - Train separate RandomForest models for each year in historical data
+  - Assign exponential weights to year-level models: `exp(-0.5 * (2025 - year))`
+  - Combine predictions using weighted voting
+- Alternative: Train single model with year-specific features + weighted loss
+- Test different ensemble strategies:
+  - Simple averaging vs weighted averaging
+  - Include/exclude oldest years (sensitivity analysis)
+- Generate 2025/2026 forecasts
+- **Output**: `models/time_weighted_ensemble.pkl`, forecasts, year weight analysis
 
-#### Phase 7: Model Selection and Evaluation
+### Phase 9: Model Comparison and Selection
 
-**`12_model_comparison.ipynb`**
-- Load all model forecasts
-- Calculate comprehensive metrics:
-  - MAPE (overall and by month)
-  - RMSE
-  - Seasonal MAPE (by quarter)
-  - Directional accuracy
-  - Forecast bias
-- Statistical significance tests (Diebold-Mariano test)
-- Model ranking by metric
-- Ensemble of best models (weighted average)
-- **Output**: Model comparison table, recommendation
+**`13_model_comparison.ipynb`** (TO BE CREATED)
+- Load all model forecasts from notebooks 07-12
+- Calculate comprehensive performance metrics:
+  - **MAPE** (Mean Absolute Percentage Error) - Primary metric
+  - **RMSE** (Root Mean Square Error) - Penalizes large errors
+  - **MAE** (Mean Absolute Error) - Interpretable in original units
+  - **Seasonal MAPE** - By quarter and by month
+  - **Directional accuracy** - % of correct trend predictions
+  - **Forecast bias** - Systematic over/under-prediction
+- Statistical significance tests:
+  - Diebold-Mariano test (compare forecast accuracy)
+  - Paired t-tests for MAPE differences
+- Model ranking by metric (with confidence intervals)
+- Analyze model strengths/weaknesses:
+  - Which models perform best by season?
+  - Which models perform best by branch/Sparte?
+  - Which models handle outliers better?
+- Create ensemble of best models:
+  - Weighted average based on validation performance
+  - Test: Equal weights vs optimized weights (minimize validation MAPE)
+- **Output**: `results/model_comparison_report.csv`, `results/model_rankings.png`
 
-**`13_model_diagnostics.ipynb`**
-- Residual analysis for all models
-- Forecast error patterns
-- Branch-specific performance
-- Month-specific performance
-- Identify where models fail
-- **Output**: Diagnostic insights, model strengths/weaknesses
+**`14_model_diagnostics.ipynb`** (TO BE CREATED)
+- Deep dive into model residuals and error patterns
+- Residual analysis for each model:
+  - Distribution (normality check)
+  - Autocorrelation (Ljung-Box test)
+  - Heteroscedasticity (constant variance check)
+  - Q-Q plots
+- Forecast error patterns:
+  - Errors by time period (recent vs older data)
+  - Errors by seasonality (summer vs winter)
+  - Errors by magnitude (small vs large orders)
+- Branch/Entity-specific performance:
+  - Which Auftraggeber are hardest to predict?
+  - Are there systematic biases by branch?
+- Sparten-specific performance:
+  - Which customer divisions are most predictable?
+  - Do certain Sparten have different seasonal patterns?
+- Identify failure modes:
+  - When do models fail? (Holidays, outlier months, structural changes)
+  - Are there systematic patterns in errors?
+- **Output**: `results/model_diagnostics_report.html`, improvement recommendations
 
-#### Phase 8: Production Forecasts
+### Phase 10: Production Forecasts
 
-**`14_final_forecast_2025.ipynb`**
-- Retrain best model(s) on full dataset
-- Generate final 2025 monthly forecasts
-- Create confidence intervals
-- Branch-level forecasts
-- Division-level forecasts (Sparten)
-- **Output**: `results/forecast_2025.csv`
+**`15_final_forecast_2025_2026.ipynb`** (TO BE CREATED)
+- Retrain best-performing model(s) on full dataset (no holdout)
+- Generate final production forecasts:
+  - Monthly forecasts for remaining 2025 months
+  - Monthly forecasts for full 2026
+  - Optionally: 2027 (with wider confidence intervals)
+- Create confidence intervals:
+  - 80% prediction intervals (typical business use)
+  - 95% prediction intervals (conservative planning)
+- Branch/Entity-level forecasts:
+  - Forecast for each Auftraggeber independently
+  - Aggregate to company-level
+- Division-level forecasts:
+  - Forecast by Sparten (customer division)
+  - Identify high-growth vs declining segments
+- Scenario analysis:
+  - Best case (95th percentile)
+  - Base case (median)
+  - Worst case (5th percentile)
+- **Output**:
+  - `results/forecast_2025_2026.csv`
+  - `results/forecast_by_auftraggeber.csv`
+  - `results/forecast_by_sparte.csv`
 
-**`15_visualization_and_reporting.ipynb`**
-- Interactive Plotly dashboards
-- Historical vs forecast comparison
-- Model A vs Model B comparison
-- Current method vs new approach
-- Branch-level dashboards
-- Export charts for presentation
-- Create executive summary
-- **Output**: `results/dashboard.html`, presentation slides
+**`16_visualization_and_reporting.ipynb`** (TO BE CREATED)
+- Create comprehensive interactive Plotly dashboards
+- Visualizations:
+  - Historical vs forecast comparison (with confidence bands)
+  - Model A vs Model B vs Ensemble comparison
+  - Current method vs new approach (improvement quantification)
+  - Branch-level dashboards (drill-down by Auftraggeber)
+  - Sparten-level dashboards (customer division insights)
+  - Seasonal pattern visualization
+  - Growth rate analysis (YoY, MoM)
+- Export charts for presentation (PNG, PDF)
+- Create executive summary report:
+  - Key findings
+  - Forecast highlights
+  - Risk factors and uncertainties
+  - Recommended actions
+- **Output**:
+  - `results/forecast_dashboard.html` (interactive)
+  - `results/forecast_presentation.pptx` (executive summary)
+  - Chart exports: `results/charts/*.png`
 
-#### Supporting Files
+### Phase 11: Deployment and Monitoring (Optional)
 
-**`utils/traveco_utils.py`** (Python module)
+**`17_forecast_automation.py`** (TO BE CREATED)
+- Automate monthly forecast updates
+- Pipeline:
+  1. Load new month's data
+  2. Update feature engineering
+  3. Retrain model (or use pre-trained)
+  4. Generate next 12-month forecasts
+  5. Compare actuals vs previous forecasts (track accuracy)
+  6. Generate alert emails if significant deviations detected
+- Schedule via cron job or cloud scheduler
+- **Output**: Automated forecast pipeline
+
+**`18_forecast_monitoring.ipynb`** (TO BE CREATED)
+- Track forecast accuracy over time
+- Monthly actuals vs forecast comparison
+- Rolling MAPE calculation
+- Detect model drift (when to retrain)
+- Alert system for significant forecast misses
+- **Output**: `results/forecast_accuracy_dashboard.html`
+
+---
+
+### Key Success Factors for Forecasting
+
+1. **Data Quality**: Ensure 36 months of clean, consistent data
+2. **Seasonality**: Swiss-specific patterns (holidays, school vacations, weather)
+3. **Business Logic**: Continue using corrected Auftraggeber aggregation
+4. **Feature Engineering**: Leverage Sparten, carrier types, Leergut tracking
+5. **Validation**: Use proper time series cross-validation (no data leakage)
+6. **Interpretability**: Prefer models that business stakeholders can understand (Prophet > XGBoost for presentations)
+7. **Ensemble**: Combine multiple models for robustness
+
+### Recommended Timeline (Once Data Received)
+
+- **Weeks 1-2**: Data integration, validation, update notebooks 02-04
+- **Weeks 3-4**: Baseline and Model A implementations (notebooks 07-10)
+- **Weeks 5-6**: Model B implementations (notebooks 11-12)
+- **Week 7**: Model comparison and selection (notebooks 13-14)
+- **Week 8**: Production forecasts and reporting (notebooks 15-16)
+- **Total**: ~8 weeks to production forecasts
+
+See `information/recommendation.md` for additional strategic guidance.
+
+### Supporting Files and Utilities
+
+**`utils/traveco_utils.py`** ✅ UPDATED (Python module)
+Key classes and methods:
 ```python
-# Reusable functions for the project
 class TravecomDataLoader:
     """Load and validate Traveco data files"""
+    load_orders()           # Load main order data (.xlsb)
+    load_tours()            # Load tour assignments
+    load_divisions()        # Load Sparten mapping
 
 class TravecomFeatureEngine:
     """Feature engineering utilities"""
-
-class TravecomForecaster:
-    """Unified forecasting interface"""
-
-def calculate_time_weights(dates, decay_rate=0.3):
-    """Calculate exponential time decay weights"""
-
-def evaluate_forecast(actual, predicted):
-    """Calculate forecasting metrics"""
+    extract_temporal_features()      # Year, month, week, quarter, etc.
+    identify_carrier_type()          # Internal vs external
+    calculate_time_weights()         # Exponential time decay
+    map_customer_divisions()         # ✅ FIXED: Auto-converts types for matching
+    apply_filtering_rules()          # ✅ UPDATED: Excludes Lager orders
 ```
 
-**`config/config.yaml`** (Configuration file)
+**`config/config.yaml`** ✅ UPDATED (Configuration file)
+Key settings:
 ```yaml
 data:
   raw_path: "data/swisstransfer_*/"
   processed_path: "data/processed/"
+  clean_orders: "clean_orders.csv"
+  features_engineered: "features_engineered.csv"
+  monthly_aggregated: "monthly_aggregated.csv"
+
+filtering:
+  exclude_bt_pickups: true        # Exclude B&T internal pickups
+  exclude_lager_orders: true      # ✅ NEW: Exclude warehouse orders
 
 features:
-  lag_periods: [1, 3, 6, 12]
   target_columns: ["revenue", "external_drivers", "personnel_costs"]
 
-models:
-  prophet:
-    yearly_seasonality: true
-    seasonality_mode: "multiplicative"
-    changepoint_prior_scale: 0.05
-
-  sarimax:
-    order: [2, 1, 2]
-    seasonal_order: [1, 1, 1, 12]
-
-  xgboost:
-    n_estimators: 200
-    max_depth: 6
-    learning_rate: 0.05
-
-  time_decay:
-    decay_rate: 0.3
-    year_decay: 0.5
+time_decay:
+  decay_rate: 0.3                 # λ for exponential decay
 ```
 
-### Notebook Execution Order
+**`debug_sparten_mapping.py`** (Diagnostic script)
+- Debugs Sparten mapping type mismatches
+- Checks customer number data types in both files
+- Identifies matching issues
+- Run: `python debug_sparten_mapping.py`
 
-Execute notebooks in sequence for a complete workflow:
+**`TROUBLESHOOTING.md`** (Common issues guide)
+- Module caching (AttributeError for new methods)
+- Sparten mapping failures
+- Kernel restart procedures
+- File path issues
+
+### Current Notebook Execution Order
+
+Execute notebooks in this sequence:
 
 ```bash
-# Phase 1: Data Understanding
-jupyter notebook notebooks/01_data_loading_and_exploration.ipynb
+# Phase 1-2: Data Preparation
 jupyter notebook notebooks/02_data_cleaning_and_validation.ipynb
-
-# Phase 2: Feature Engineering
 jupyter notebook notebooks/03_feature_engineering.ipynb
 jupyter notebook notebooks/04_aggregation_and_targets.ipynb
 
-# Phase 3: EDA
+# Phase 3: Analysis
 jupyter notebook notebooks/05_exploratory_data_analysis.ipynb
+jupyter notebook notebooks/06_tour_cost_analysis.ipynb
 
-# Phase 4-6: Modeling
-jupyter notebook notebooks/06_baseline_models.ipynb
-jupyter notebook notebooks/07_model_a_prophet.ipynb
-# ... continue with other model notebooks
-
-# Phase 7-8: Evaluation and Production
-jupyter notebook notebooks/12_model_comparison.ipynb
-jupyter notebook notebooks/14_final_forecast_2025.ipynb
-jupyter notebook notebooks/15_visualization_and_reporting.ipynb
+# Phase 4: Reporting
+pipenv run python create_presentation.py
 ```
+
+**Important**: After updating `utils/traveco_utils.py`, always **restart the Jupyter kernel** before re-running notebooks!
 
 ### Python Environment Setup
 
