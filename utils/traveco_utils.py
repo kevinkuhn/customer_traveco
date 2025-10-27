@@ -444,8 +444,8 @@ class TravecomFeatureEngine:
 
         print(f"\n📦 Classifying order types (multi-field logic):")
 
-        # Check required columns
-        required_cols = ['Auftragsart', 'Lieferart 2.0', 'System_id.Auftrag']
+        # Check required columns (use 'Auftrags-art' with hyphen as in Excel file)
+        required_cols = ['Auftrags-art', 'Lieferart 2.0', 'System_id.Auftrag']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             print(f"   ⚠️  Missing columns: {missing_cols}")
@@ -454,7 +454,7 @@ class TravecomFeatureEngine:
             return df
 
         def classify_row(row):
-            k = row['Auftragsart'] if pd.notna(row['Auftragsart']) else ''
+            k = row['Auftrags-art'] if pd.notna(row['Auftrags-art']) else ''
             au = row['Lieferart 2.0'] if pd.notna(row['Lieferart 2.0']) else ''
             cw = row['System_id.Auftrag'] if pd.notna(row['System_id.Auftrag']) else ''
 
