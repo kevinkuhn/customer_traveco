@@ -708,7 +708,7 @@ class TravecomDataCleaner:
             else:
                 print(f"   ⚠️  Column 'Lieferart 2.0' not found - skipping Lager filter")
 
-        # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer)
+        # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer OR empty Auftraggeber)
         if self.config.get('filtering.exclude_bt_pickups', True):
             # Check for both RKdNr and RKdNr. (column name variations)
             rkd_col = None
@@ -719,7 +719,17 @@ class TravecomDataCleaner:
 
             if 'System_id.Auftrag' in df.columns and rkd_col is not None:
                 before = len(df)
-                mask = ~((df['System_id.Auftrag'] == 'B&T') & (df[rkd_col].isna()))
+                # B&T pickups: System='B&T' AND (empty customer OR empty Auftraggeber)
+                bt_mask = (df['System_id.Auftrag'] == 'B&T')
+                empty_customer_mask = df[rkd_col].isna()
+
+                # Also check for empty Auftraggeber (these are also B&T pickups)
+                if 'Nummer.Auftraggeber' in df.columns:
+                    empty_auftraggeber_mask = df['Nummer.Auftraggeber'].isna()
+                    mask = ~(bt_mask & (empty_customer_mask | empty_auftraggeber_mask))
+                else:
+                    mask = ~(bt_mask & empty_customer_mask)
+
                 df = df[mask]
 
                 filtered_count = before - len(df)
