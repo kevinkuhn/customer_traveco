@@ -753,7 +753,8 @@ class TravecomDataCleaner:
             else:
                 print(f"   ⚠️  Column 'Lieferart 2.0' not found - skipping Lager filter")
 
-        # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer OR empty Auftraggeber)
+        # 2. SECOND: Exclude B&T pickup orders (System B&T with empty customer)
+        # Per Christian's feedback: "System_id.Auftrag == 'B&T' AND RKdNr (customer) is empty"
         if self.config.get('filtering.exclude_bt_pickups', True):
             # Check for RKdNr (cleaned) or RKdNr. (original with dot)
             rkd_col = None
@@ -764,20 +765,13 @@ class TravecomDataCleaner:
 
             if 'System_id.Auftrag' in df.columns and rkd_col is not None:
                 before = len(df)
-                # B&T pickups: System='B&T' AND (empty customer OR empty/placeholder Auftraggeber)
+                # B&T pickups: System='B&T' AND empty customer (RKdNr)
+                # Do NOT include Auftraggeber check - Christian's rule is specific to RKdNr only
                 bt_mask = (df['System_id.Auftrag'] == 'B&T')
                 empty_customer_mask = df[rkd_col].isna()
 
-                # Also check for empty/placeholder Auftraggeber
-                if 'Nummer.Auftraggeber' in df.columns:
-                    # Handle both NaN and placeholder '-'
-                    empty_auftraggeber_mask = df['Nummer.Auftraggeber'].isna() | df['Nummer.Auftraggeber'].isin(['-', '', ' '])
-                    # Combine: B&T AND (empty customer OR empty/placeholder Auftraggeber)
-                    mask = ~(bt_mask & (empty_customer_mask | empty_auftraggeber_mask))
-                else:
-                    # Only check customer if Auftraggeber column doesn't exist
-                    mask = ~(bt_mask & empty_customer_mask)
-
+                # Exclude B&T orders with empty customer
+                mask = ~(bt_mask & empty_customer_mask)
                 df = df[mask]
 
                 filtered_count = before - len(df)
