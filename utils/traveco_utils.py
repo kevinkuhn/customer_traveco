@@ -766,9 +766,10 @@ class TravecomDataCleaner:
             if 'System_id.Auftrag' in df.columns and rkd_col is not None:
                 before = len(df)
                 # B&T pickups: System='B&T' AND empty customer (RKdNr)
+                # "Empty" includes: NaN, empty string, placeholder '-'
                 # Do NOT include Auftraggeber check - Christian's rule is specific to RKdNr only
                 bt_mask = (df['System_id.Auftrag'] == 'B&T')
-                empty_customer_mask = df[rkd_col].isna()
+                empty_customer_mask = df[rkd_col].isna() | df[rkd_col].isin(['-', '', ' '])
 
                 # Exclude B&T orders with empty customer
                 mask = ~(bt_mask & empty_customer_mask)
