@@ -226,7 +226,7 @@ For building this project step-by-step, create the following notebook sequence:
 
 **Status**: Waiting for historical data (~36 months back from June 2025)
 **Required**: Data from ~June 2022 to June 2025 for robust forecasting
-**Objective**: Predict 2025+ monthly transport metrics (revenue, external drivers, personnel costs)
+**Objective**: Predict 2025+ monthly transport metrics (total_orders, total_km, total_drivers, revenue_total, external_drivers)
 
 Once historical data is available, implement the following forecasting workflow:
 
@@ -490,7 +490,7 @@ filtering:
   exclude_lager_orders: true      # ✅ NEW: Exclude warehouse orders
 
 features:
-  target_columns: ["revenue", "external_drivers", "personnel_costs"]
+  target_columns: ["total_orders", "total_km", "total_drivers", "revenue_total", "external_drivers"]
 
 time_decay:
   decay_rate: 0.3                 # λ for exponential decay
@@ -813,7 +813,7 @@ The main forecasting system is implemented as a single stateful class in `Foreca
 ```python
 forecaster = TravecomForecaster(
     data=df,
-    target_columns=['revenue', 'external_drivers', 'personnel_costs']
+    target_columns=['total_orders', 'total_km', 'total_drivers', 'revenue_total', 'external_drivers']
 )
 
 # Standard workflow:
@@ -866,7 +866,7 @@ Emphasizes recent data relevance (addresses structural market changes):
 forecaster.prepare_data()
 # Extracts: year, month, week, quarter, day_of_year, weekday
 # Aggregates: Monthly by branch
-# Calculates: revenue, external_drivers, personnel_costs sums
+# Calculates: total_orders, total_km, total_drivers, revenue_total, external_drivers sums
 
 # 2. Time Decay Weighting
 weights = forecaster.calculate_time_weights(dates, decay_rate=0.3)
